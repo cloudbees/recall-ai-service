@@ -1,0 +1,211 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: deploy
+
+# Reusable: the Application-level deployer calls this once per environment.
+on:
+  workflow_call:
+    inputs:
+      artifact-id:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+      component-repo:
+        type: string
+        required: true
+        description: >-
+          Clone URL of THIS component's repository. Required when called,
+          because a reusable workflow runs in the CALLER's repository
+          context. checkout defaults to cloudbees.scm.repositoryUrl, which
+          then resolves to the Application repo, and the chart path does not
+          exist there:
+            realpath: /cloudbees/workspace/apps/<name>/chart: No such file
+  workflow_dispatch:
+    inputs:
+      artifact-id:
+        type: string
+        required: true
+        description: >-
+          Artifact ID from the build's evidence tab. Deploying it records this
+          release against the environment. Use `manual` to deploy without
+          recording it — useful when testing, useless for traceability.
+        default: manual
+      version:
+        type: string
+        required: true
+        description: >-
+          The image tag to deploy: the commit SHA shown as Version in the build's
+          evidence tab. Builds push only a SHA tag, so there is no `latest`.
+      environment:
+        type: choice
+        options:
+          - DEV
+          - STAGING
+          - PROD
+        default: DEV
+        description: Which environment to deploy to.
+      component-repo:
+        type: string
+        required: true
+        default: self
+        description: >-
+          Leave as `self` when dispatching; it resolves to this repository.
+          The Application passes a real clone URL instead, because a called
+          workflow runs in the CALLER's repository context.
+          A default cannot itself be an expression: the literal text is passed
+          through unevaluated, and the checkout action's shell then fails with
+          "sh: syntax error: bad substitution".
+
+permissions:
+  scm-token-own: read
+  scm-token-org: read
+
+jobs:
+  deploy:
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: cloudbees-io/checkout@v2
+        with:
+          repository: ${{ inputs.component-repo != 'self' && inputs.component-repo || cloudbees.scm.repositoryUrl }}
+          # version IS the commit the image was built from, so this pins the
+          # chart to that commit rather than whatever main happens to be.
+          ref: ${{ inputs.version }}
+
+      - name: Check the version to deploy
+        uses: docker://alpine:latest
+        env:
+          DEPLOY_VERSION: ${{ inputs.version }}
+        run: |
+          # Builds push a commit-SHA tag only. `latest` has never existed, and an
+          # absent tag pulls nothing. Catching it here costs one step and avoids an
+          # ImagePullBackOff that looks like a registry auth failure minutes later.
+          if [ -z "$DEPLOY_VERSION" ] || [ "$DEPLOY_VERSION" = "latest" ]; then
+            echo "version must be the image tag to deploy."
+            echo "Use the commit SHA shown against artifact-id in the build evidence."
+            echo "Builds push only a SHA tag, so 'latest' does not exist."
+            exit 1
+          fi
+          echo "deploying version $DEPLOY_VERSION"
+
+      - name: Set kubeconfig
+        uses: docker://alpine:latest
+        env:
+          KCFG_B64: ${{ secrets.kubeconfig }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p /cloudbees/home/.kube
+          printf '%s' "$KCFG_B64" | tr -d '\r\n ' | base64 -d > /cloudbees/home/.kube/config
+          chmod 600 /cloudbees/home/.kube/config
+
+      - name: Install helm chart
+        id: install-chart
+        uses: cloudbees-io/helm-install@v1
+        with:
+          chart-location: ${{ cloudbees.workspace }}/apps/ai-service/chart
+          release-name: recall-ai-service
+          namespace: ${{ vars.namespace }}
+          # The namespace is provisioned ahead of the workshop, so Helm must not try to
+          # create it. The action defaults create-namespace to true, which makes skaffold
+          # issue a namespace create unconditionally. Kubernetes authorises before it
+          # checks existence, so an attendee's namespace-scoped credentials are rejected:
+          #
+          #   namespaces is forbidden: User "system:serviceaccount:...:deployer" cannot
+          #   create resource "namespaces" at the cluster scope
+          #
+          # which reads as a missing namespace rather than an unwanted create.
+          create-namespace: false
+          values: |
+            image:
+              repository: docker.io/${{ vars.DOCKERHUB_USER }}/recall-ai-service
+              tag: ${{ inputs.version }}
+            env:
+              PORT: "8080"
+              # The in-cluster PostgreSQL does not serve TLS, and the client code treats
+              # any value other than the literal string "disable" as SSL-required — a
+              # default written when this connected to RDS. An empty string therefore
+              # still requires SSL, and the migration Job fails 30 times with
+              # "The server does not support SSL connections" before the deploy reports
+              # only BackoffLimitExceeded.
+              #
+              # Traffic stays inside the attendee namespace on a dedicated workshop
+              # cluster, and the data is disposable. Do not carry this to a shared or
+              # long-lived database.
+              DATABASE_SSL: "disable"
+            secretEnv:
+              DATABASE_URL: ${{ toJSON(secrets.DATABASE_URL) }}
+              # Raises the openFDA limit from 1,000/day per IP to 120,000/day per key.
+              # Every attendee shares one NAT gateway address, so without this the whole
+              # cohort competes for the per-IP allowance.
+              FDA_API_KEY: ${{ toJSON(secrets.FDA_API_KEY != 'unset' && secrets.FDA_API_KEY || '') }}
+              ANTHROPIC_API_KEY: ${{ toJSON(secrets.ANTHROPIC_API_KEY != 'unset' && secrets.ANTHROPIC_API_KEY || '') }}
+              VOYAGE_API_KEY: ${{ toJSON(secrets.VOYAGE_API_KEY != 'unset' && secrets.VOYAGE_API_KEY || '') }}
+              # `unset` is the sentinel for "no SDK key yet". Unify will not save a
+              # variable or secret with an empty value, so every key needs something in
+              # it — attendees cannot simply leave this blank before Module 07. Map the
+              # sentinel back to an empty string, or the SDK tries to authenticate with
+              # the literal word `unset` instead of taking its documented no-key path.
+              #
+              # Written as `!= 'unset' && value || ''` deliberately. The natural
+              # `== 'unset' && '' || value` does NOT work: '' is falsy, so the
+              # ternary falls through to value precisely when the sentinel is set.
+              FM_KEY: ${{ toJSON(vars.FM_KEY != 'unset' && vars.FM_KEY || '') }}
+
+      - name: Show what happened in the namespace
+        # `if: always()` rather than `if: failure()` - always() is proven to work in
+        # Unify, failure() is not, and an unsupported function is fatal at dispatch.
+        # On success this prints a single line.
+        #
+        # Exists because Helm reports only a summary: a failed migration surfaces as
+        # BackoffLimitExceeded while the real cause sits in a pod log the attendee
+        # would need kubectl to read. In a workshop about pipelines, sending people to
+        # a terminal to find out why a deploy failed is a poor answer.
+        if: always()
+        uses: docker://bitnami/kubectl:latest
+        env:
+          KCFG_B64: ${{ secrets.kubeconfig }}
+          NS: ${{ vars.namespace }}
+        run: |
+          [ -n "$KCFG_B64" ] || exit 0
+          umask 077
+          mkdir -p /tmp/.kube
+          printf '%s' "$KCFG_B64" | tr -d '\r\n ' | base64 -d > /tmp/.kube/config 2>/dev/null || exit 0
+          export KUBECONFIG=/tmp/.kube/config
+          UNHEALTHY=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | awk '$3 != "Running" && $3 != "Completed" { print $1 }')
+          if [ -z "$UNHEALTHY" ]; then
+            echo "All pods in $NS are Running or Completed."
+            exit 0
+          fi
+          echo "=== Pods ==="
+          kubectl get pods -n "$NS" 2>/dev/null
+          for p in $UNHEALTHY; do
+            echo
+            echo "=== Logs: $p (last 40 lines) ==="
+            kubectl logs "$p" -n "$NS" --tail=40 2>&1 | tail -40
+          done
+          echo
+          echo "=== Recent events ==="
+          kubectl get events -n "$NS" --sort-by=.lastTimestamp 2>/dev/null | tail -15
+
+      - name: Register deployed artifact
+        if: ${{ inputs.artifact-id != 'test-deploy' && inputs.artifact-id != 'manual' && inputs.artifact-id != '' }}
+        uses: cloudbees-io/register-deployed-artifact@v2
+        with:
+          artifact-id: ${{ inputs.artifact-id }}
+          target-environment: ${{ inputs.environment }}
+
+      - name: Publish deploy evidence
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## recall-ai-service deployed to ${{ inputs.environment }}
+            - **Image:** recall-ai-service:${{ inputs.version }}
+            - **Namespace:** ${{ vars.namespace }}
+            - **Artifact ID:** ${{ inputs.artifact-id }}
+          format: MARKDOWN

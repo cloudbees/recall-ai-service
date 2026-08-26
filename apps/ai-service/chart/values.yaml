@@ -1,0 +1,40 @@
+image:
+  repository: docker.io/CHANGEME/recall-ai-service
+  # Builds push only a commit-SHA tag, so there is no `latest` to fall back on.
+  # deploy.yaml always sets this from the release manifest; an empty value here
+  # fails at pod creation rather than silently pulling something stale.
+  tag: ""
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  port: 8080
+
+# Non-sensitive configuration, rendered directly as container env.
+env:
+  PORT: '8080'
+  DATABASE_SSL: ""
+
+# Sensitive values. Rendered into a Secret and referenced by secretKeyRef, so
+# they do not appear in `kubectl get deployment -o yaml`. Supply at deploy time
+# with --set-string, or point existingSecret at a Secret managed elsewhere.
+secretEnv:
+  # openFDA API key. Blank means unauthenticated: 1,000 requests/day per IP.
+  FDA_API_KEY: ""
+  DATABASE_URL: ""
+  ANTHROPIC_API_KEY: ""
+  VOYAGE_API_KEY: ""
+  FM_KEY: ""
+
+# If set, this Secret is used instead of one created by this chart. Preferred
+# for real deployments so credentials never pass through Helm values.
+existingSecret: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

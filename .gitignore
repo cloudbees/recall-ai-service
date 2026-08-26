@@ -1,0 +1,54 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies (monorepo: match at any depth, not just the root)
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js (monorepo: apps/*/.next as well as the root)
+.next/
+out/
+
+# production
+build/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+# ...but the example MUST be committed: it is the only place the app's required
+# configuration is written down, and the generator ships it to attendees.
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# MCP configuration (contains tokens)
+.mcp.json
+.playwright-mcp/
+
+# Claude Code local settings (contains local paths/tokens)
+.claude/settings.local.json
+
+# Reference source repos (too large for git)
+source-apps/

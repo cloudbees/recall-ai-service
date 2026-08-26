@@ -1,0 +1,16 @@
+{{ .Chart.Name }} {{ .Chart.AppVersion }} deployed as release {{ .Release.Name }}.
+
+Image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{- if contains "CHANGEME" .Values.image.repository }}
+
+  !! image.repository still contains CHANGEME. Set it to your registry.
+{{- end }}
+{{- if and (not .Values.existingSecret) (not .Values.secretEnv.DATABASE_URL) }}
+  !! DATABASE_URL is not set. Supply it with --set-string secretEnv.DATABASE_URL=... or point
+     existingSecret at a Secret that provides it. The container will start
+     without it and fail in a way that does not name this as the cause.
+{{- end }}
+{{- if .Values.existingSecret }}
+
+Secrets come from the existing Secret {{ .Values.existingSecret }}.
+{{- end }}

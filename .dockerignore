@@ -1,0 +1,34 @@
+# Repo-root .dockerignore.
+#
+# All component images build with the repo root as context, because every one of
+# them needs the workspace root package.json, the lockfile, and packages/shared.
+# A per-app context cannot see those.
+
+node_modules
+**/node_modules
+
+.next
+**/.next
+out
+**/out
+
+.git
+.github
+.claude
+
+.env
+.env.*
+**/.env
+**/.env.*
+
+docs
+*.md
+**/*.md
+
+*.tsbuildinfo
+**/*.tsbuildinfo
+.DS_Store
+**/.DS_Store
+
+# Superseded migrations are history, not something to ship in the image.
+apps/recall-db/superseded

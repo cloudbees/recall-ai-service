@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["esnext"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    // Runs its TypeScript directly under Node's native type stripping, with no
+    // build step. Type-only imports must say `import type`, or Node emits a
+    // runtime import for a compile-time-only symbol.
+    "verbatimModuleSyntax": true,
+    // Reject TypeScript that emits runtime code (enums, namespaces, parameter
+    // properties). tsc accepts these, but Node's strip-only mode cannot run
+    // them — so without this the failure only appears at boot.
+    "erasableSyntaxOnly": true,
+    "types": ["node"],
+    "paths": {
+      "@/*": ["./*"],
+      "@recall/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "lib/**/*.ts"],
+  "exclude": ["node_modules"]
+}

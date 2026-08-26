@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["esnext"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // Internal relative imports carry explicit .ts extensions so Node ESM can
+    // resolve them when this package is loaded as source under type stripping.
+    "allowImportingTsExtensions": true,
+    // Required so Node's native type stripping can run this package's .ts files
+    // directly with no build step: type-only imports must be written as
+    // `import type`, otherwise Node emits a real import for a type that does
+    // not exist at runtime.
+    "verbatimModuleSyntax": true,
+    // Reject TypeScript that emits runtime code (enums, namespaces, parameter
+    // properties). tsc accepts these, but Node's strip-only mode cannot run
+    // them — so without this the failure only appears at boot.
+    "erasableSyntaxOnly": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

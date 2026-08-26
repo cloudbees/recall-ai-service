@@ -1,0 +1,36 @@
+{
+  "name": "@recall/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Code shared by two or more Recall Tracker components: the Kysely client and table types, Feature Management init and flag definitions, and cross-cutting utils.",
+  "exports": {
+    "./ai/anthropic-client": "./src/ai/anthropic-client.ts",
+    "./auth-config": "./src/auth-config.ts",
+    "./db": "./src/db.ts",
+    "./fm": "./src/fm/index.ts",
+    "./fm/flags": "./src/fm/flags.ts",
+    "./recall/fda-client": "./src/recall/fda-client.ts",
+    "./services/company": "./src/services/company.ts",
+    "./services/discovery": "./src/services/discovery.ts",
+    "./services/documents": "./src/services/documents.ts",
+    "./services/embeddings": "./src/services/embeddings.ts",
+    "./services/requirements": "./src/services/requirements.ts",
+    "./services/user": "./src/services/user.ts",
+    "./utils/normalize-website": "./src/utils/normalize-website.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "kysely": "^0.29.5",
+    "pg": "^8.16.3",
+    "rox-node": "^6.0.13",
+    "next-auth": "5.0.0-beta.32"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.16.0",
+    "@types/rox-node": "^5.0.5",
+    "typescript": "^5"
+  }
+}

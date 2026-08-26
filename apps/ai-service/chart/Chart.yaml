@@ -1,0 +1,6 @@
+apiVersion: v2
+name: recall-ai-service
+description: "Recall Advisor AI service. Backend service, no public route. Owns the recall.recallAdvisor flag gate."
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

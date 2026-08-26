@@ -1,0 +1,88 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: build
+
+# Builds the recall-ai-service image and registers it as a build artifact, which is what
+# makes this version selectable in the release manifest generator.
+#
+# workflow_call with matching outputs lets the Application-level deployer treat
+# this as a reusable workflow.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      artifact-id:
+        value: ${{ jobs.build.outputs.artifact-id }}
+      artifact-version:
+        value: ${{ jobs.build.outputs.artifact-version }}
+
+permissions:
+  scm-token-own: read
+  scm-token-org: read
+  id-token: read
+
+jobs:
+  build:
+    outputs:
+      artifact-id: ${{ steps.extract-artifact-id.outputs.artifact-id }}
+      artifact-version: ${{ cloudbees.scm.sha }}
+    steps:
+      - name: Checkout
+        uses: cloudbees-io/checkout@v2
+
+      - name: Typecheck
+        uses: docker://node:24-alpine
+        run: |
+          npm ci
+          npm run typecheck --workspaces --if-present
+        # A real quality gate. `next build` prints "Skipping validation of
+        # types", so without this step a green build proves only that the code
+        # compiles, not that it typechecks.
+
+      - name: Configure Docker Hub credentials
+        id: dockerconfig
+        uses: cloudbees-io/configure-oci-credentials@v1
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push container image
+        id: kaniko
+        uses: cloudbees-io/kaniko@v1
+        kind: build
+        with:
+          destination: docker.io/${{ vars.DOCKERHUB_USER }}/recall-ai-service:${{ cloudbees.scm.sha }}
+          dockerfile: apps/ai-service/Dockerfile
+          # Context is the repo root: npm workspaces resolve from the root
+          # package.json and lockfile, which a per-app context cannot see.
+          context: ${{ cloudbees.workspace }}
+
+      - name: Extract artifact ID
+        id: extract-artifact-id
+        uses: docker://alpine:latest
+        run: |
+          ARTIFACT_IDS='${{ steps.kaniko.outputs.artifact-ids }}'
+          ARTIFACT_ID=$(echo "$ARTIFACT_IDS" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+          echo "Extracted artifact ID: $ARTIFACT_ID"
+          echo -n "$ARTIFACT_ID" >> $CLOUDBEES_OUTPUTS/artifact-id
+
+      - name: Publish build evidence
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## recall-ai-service built
+            - **Image:** docker.io/${{ vars.DOCKERHUB_USER }}/recall-ai-service:${{ cloudbees.scm.sha }}
+            
+            To deploy this build on its own, run the **deploy** workflow with:
+            
+            | Deploy input | Value |
+            |---|---|
+            | `artifact-id` | `${{ steps.extract-artifact-id.outputs.artifact-id }}` |
+            | `version` | `${{ cloudbees.scm.sha }}` |
+            
+            A release passes both automatically. This table is for manual deploys.
+          format: MARKDOWN
