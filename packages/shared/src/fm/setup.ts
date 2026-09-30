@@ -55,6 +55,26 @@ export async function initFM(): Promise<void> {
 
   Rox.register('recall', { ...featureFlags, ...configFlags, headerTheme });
 
+  // Context-driven properties, for evaluating a flag AS a given identity rather
+  // than as whatever the process last happened to set globally.
+  //
+  // A function property is handed the context passed to isEnabled(name, default,
+  // context), so `isEnabled(f, false, { userId: 'user-42' })` resolves userId to
+  // that value for that call alone. Point a percentage rollout's stickiness
+  // property at `userId` and the bucket becomes md5(userId + seed) — fixed per
+  // identity, so raising the percentage only ever adds users rather than
+  // reshuffling them.
+  //
+  // This does NOT replace setFmCustomProperties below. That sets properties
+  // globally on the SDK instance and is what the kill switch relies on; these
+  // only produce a value when a context supplies one, and fall back to the
+  // global value otherwise. Both mechanisms coexist.
+  //
+  // @ts-ignore — rox-node v6 accepts a function; @types/rox-node is v5
+  Rox.setCustomStringProperty('userId', (ctx: { userId?: string } = {}) => ctx.userId ?? '');
+  // @ts-ignore
+  Rox.setCustomStringProperty('companySize', (ctx: { companySize?: string } = {}) => ctx.companySize ?? '');
+
   try {
     // configurationFetchedHandler is the only server-side notice that flag values
     // changed. Without it the SDK just quietly starts answering differently, and
