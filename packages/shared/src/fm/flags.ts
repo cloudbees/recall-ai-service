@@ -10,6 +10,7 @@ export const featureFlags = {
   // turn it on, the interface is unavailable, turn it off, everything returns. A
   // flag called errorState telegraphs the ending.
   dashboardRedesign: new Rox.Flag(false),  // Kill switch — closes the app while on
+  auditExport:      new Rox.Flag(false),   // Spreadsheet export of the matrix
 };
 
 // ── Number configs (remote tuning) ─────────────────────────────
