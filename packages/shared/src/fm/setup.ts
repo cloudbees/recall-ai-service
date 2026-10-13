@@ -55,25 +55,33 @@ export async function initFM(): Promise<void> {
 
   Rox.register('recall', { ...featureFlags, ...configFlags, headerTheme });
 
-  // Context-driven properties, for evaluating a flag AS a given identity rather
-  // than as whatever the process last happened to set globally.
+  // Targeting properties, read from the context passed to each evaluation:
   //
-  // A function property is handed the context passed to isEnabled(name, default,
-  // context), so `isEnabled(f, false, { userId: 'user-42' })` resolves userId to
-  // that value for that call alone. Point a percentage rollout's stickiness
-  // property at `userId` and the bucket becomes md5(userId + seed) — fixed per
-  // identity, so raising the percentage only ever adds users rather than
-  // reshuffling them.
+  //   Rox.dynamicApi.isEnabled(flag, false, fmContext({ userId, email, ... }))
   //
-  // This does NOT replace setFmCustomProperties below. That sets properties
-  // globally on the SDK instance and is what the kill switch relies on; these
-  // only produce a value when a context supplies one, and fall back to the
-  // global value otherwise. Both mechanisms coexist.
+  // Every property is a FUNCTION of that context, and nothing ever sets one to a
+  // plain value. That is deliberate, and it fixes a real bug.
+  //
+  // A server SDK holds one set of custom properties for the whole process. The
+  // previous version registered userId and companySize as functions here, then
+  // setFmCustomProperties() re-registered them as plain values for whoever had
+  // just loaded the matrix. Registering a property again REPLACES it, so from
+  // that moment every evaluation in the process saw one user's userId:
+  //
+  //   - /admin/rollout bucketed all 200 sample identities into one bucket, so the
+  //     grid went all-on or all-off as the percentage moved past it.
+  //   - Two users loading the app at once could each be evaluated with the
+  //     other's companySize, state or email — a targeting rule silently answering
+  //     for the wrong person.
+  //
+  // With every property a function of the call's own context, each evaluation
+  // sees only the identity it was given. An evaluation given no context sees
+  // empty values, which is the honest answer for "no user".
   //
   // @ts-ignore — rox-node v6 accepts a function; @types/rox-node is v5
-  Rox.setCustomStringProperty('userId', (ctx: { userId?: string } = {}) => ctx.userId ?? '');
+  for (const name of STRING_PROPERTIES) Rox.setCustomStringProperty(name, (ctx: FmContext = {}) => ctx[name] ?? '');
   // @ts-ignore
-  Rox.setCustomStringProperty('companySize', (ctx: { companySize?: string } = {}) => ctx.companySize ?? '');
+  Rox.setCustomBooleanProperty('isLoggedIn', (ctx: FmContext = {}) => ctx.isLoggedIn ?? false);
 
   try {
     // configurationFetchedHandler is the only server-side notice that flag values
@@ -111,7 +119,22 @@ function companySizeBucket(employeeCount: number): string {
   return 'small';
 }
 
-export function setFmCustomProperties(props: {
+/** String targeting properties, as named in Feature Management target groups. */
+const STRING_PROPERTIES = [
+  'userId', 'email', 'company', 'companyId', 'companySize',
+  'naicsCode', 'productCategory', 'state', 'supplyChainRole',
+] as const;
+
+export type FmContext = Partial<Record<(typeof STRING_PROPERTIES)[number], string>> & {
+  isLoggedIn?: boolean;
+};
+
+/**
+ * Build the evaluation context for one user. Pass the result as the third
+ * argument to isEnabled() / value(); see the note in initFM() for why properties
+ * are never set globally.
+ */
+export function fmContext(props: {
   companyName?: string;
   companyId?: string;
   employeeCount?: number;
@@ -122,15 +145,17 @@ export function setFmCustomProperties(props: {
   supplyChainRole?: string;
   productCategory?: string;
   isLoggedIn?: boolean;
-}): void {
-  if (props.companyName) Rox.setCustomStringProperty('company', props.companyName);
-  if (props.companyId) Rox.setCustomStringProperty('companyId', props.companyId);
-  if (props.employeeCount != null) Rox.setCustomStringProperty('companySize', companySizeBucket(props.employeeCount));
-  if (props.naicsCode) Rox.setCustomStringProperty('naicsCode', props.naicsCode);
-  if (props.productCategory) Rox.setCustomStringProperty('productCategory', props.productCategory);
-  if (props.state) Rox.setCustomStringProperty('state', props.state);
-  if (props.userId) Rox.setCustomStringProperty('userId', props.userId);
-  if (props.email) Rox.setCustomStringProperty('email', props.email);
-  if (props.supplyChainRole) Rox.setCustomStringProperty('supplyChainRole', props.supplyChainRole);
-  if (props.isLoggedIn != null) Rox.setCustomBooleanProperty('isLoggedIn', props.isLoggedIn);
+}): FmContext {
+  const ctx: FmContext = {};
+  if (props.companyName) ctx.company = props.companyName;
+  if (props.companyId) ctx.companyId = props.companyId;
+  if (props.employeeCount != null) ctx.companySize = companySizeBucket(props.employeeCount);
+  if (props.naicsCode) ctx.naicsCode = props.naicsCode;
+  if (props.productCategory) ctx.productCategory = props.productCategory;
+  if (props.state) ctx.state = props.state;
+  if (props.userId) ctx.userId = props.userId;
+  if (props.email) ctx.email = props.email;
+  if (props.supplyChainRole) ctx.supplyChainRole = props.supplyChainRole;
+  if (props.isLoggedIn != null) ctx.isLoggedIn = props.isLoggedIn;
+  return ctx;
 }

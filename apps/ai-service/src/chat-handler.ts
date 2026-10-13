@@ -9,7 +9,7 @@
 // the capability. Core API must not duplicate or short-circuit the check.
 
 import Rox from 'rox-node';
-import { setFmCustomProperties } from '@recall/shared/fm';
+import { fmContext } from '@recall/shared/fm';
 import { opusClient } from '@recall/shared/ai/anthropic-client';
 import type { AnthropicMessage } from '@recall/shared/ai/anthropic-client';
 import db from '@recall/shared/db';
@@ -71,9 +71,11 @@ export async function handleChat(req: ChatRequest): Promise<ChatResult> {
 
   const companyId = context.companyId;
 
-  // Set FM custom properties for targeting BEFORE flag evaluation, using the
-  // context Core API forwarded.
-  setFmCustomProperties({
+  // Evaluated AS this user, from the context Core API forwarded. Passed per
+  // evaluation, never set globally on the SDK: one process serves every user, so
+  // a global property belongs to whoever was evaluated last. See initFM() in
+  // packages/shared/src/fm/setup.ts.
+  const flagContext = fmContext({
     companyId,
     employeeCount: context.employeeCount,
     naicsCode: context.naicsCode,
@@ -85,7 +87,7 @@ export async function handleChat(req: ChatRequest): Promise<ChatResult> {
 
   // FM gate — recallAdvisor (Enterprise-targeted kill switch).
   // Owned by this service; see the note at the top of the file.
-  if (!Rox.dynamicApi.isEnabled('recall.recallAdvisor', false)) {
+  if (!Rox.dynamicApi.isEnabled('recall.recallAdvisor', false, flagContext)) {
     throw new ChatError('Recall Advisor is not enabled for your account', 403);
   }
 
